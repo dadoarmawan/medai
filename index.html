@@ -78,6 +78,7 @@ button,input,textarea,select{font:inherit}.wrap{max-width:1400px;margin:auto;pad
 <script>
 const $=s=>document.querySelector(s);
 let recognition=null, recording=false, startedAt=0, timerHandle=null, finalSegments=[];
+let lastFinalText='', recentFinals=[], interimText='';
 let lines=[];
 const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition;
 
@@ -96,8 +97,30 @@ function renderTranscript(){
 }
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
 
+function normalizeSpeechText(text){
+ return text.toLowerCase().replace(/[.,!?;:]+/g,' ').replace(/\s+/g,' ').trim();
+}
+function isDuplicateSpeech(text){
+ const n=normalizeSpeechText(text);
+ if(!n)return true;
+ // Ignore exact repeats and very similar repeats produced by browser recognition.
+ if(n===normalizeSpeechText(lastFinalText)) return true;
+ if(recentFinals.some(x=>x===n)) return true;
+ const words=n.split(' ');
+ for(const prev of recentFinals){
+   const pw=prev.split(' ');
+   if(words.length>=5 && pw.length>=5){
+     const a=n.length>pw.length?n:prev, b=n.length>pw.length?prev:n;
+     if(a.includes(b) && b.length/a.length>0.72) return true;
+   }
+ }
+ return false;
+}
 function appendSpeech(text){
- text=text.trim(); if(!text)return;
+ text=text.trim(); if(!text || isDuplicateSpeech(text)) return;
+ lastFinalText=text;
+ recentFinals.push(normalizeSpeechText(text));
+ if(recentFinals.length>12) recentFinals.shift();
  finalSegments.push(text);
  $('#rawText').value=finalSegments.join(' ');
  const speaker=guessSpeaker(text);
@@ -129,6 +152,7 @@ function setupSpeech(){
      const t=e.results[i][0].transcript;
      if(e.results[i].isFinal) appendSpeech(t); else interim+=t;
    }
+   interimText=interim;
    $('#meter').style.width=Math.min(100,20+interim.length*2)+'%';
  };
  recognition.onerror=e=>{
@@ -228,7 +252,7 @@ function renderAI(r){
 $('#recordBtn').onclick=startStop;
 $('#analyzeBtn').onclick=analyze;
 $('#analyzeBtn2').onclick=analyze;
-$('#clearBtn').onclick=()=>{finalSegments=[];lines=[];$('#rawText').value='';$('#transcript').innerHTML='<div class="empty">Belum ada percakapan.</div>';setState('Siap');};
+$('#clearBtn').onclick=()=>{finalSegments=[];lines=[];recentFinals=[];lastFinalText='';interimText='';$('#rawText').value='';$('#transcript').innerHTML='<div class="empty">Belum ada percakapan.</div>';setState('Siap');};
 $('#exportBtn').onclick=()=>{
  const data={transcript:$('#rawText').value,anamnesis:$('#chief').textContent+' '+$('#hpi').textContent,redFlags:$('#redflags').textContent,generatedAt:new Date().toISOString()};
  const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
